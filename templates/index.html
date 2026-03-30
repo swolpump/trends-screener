@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Google Trends Earnings Screener</title>
+<style>
+:root{--bg:#0f1117;--s:#1a1d27;--s2:#232736;--bd:#2d3148;--t:#e4e6f0;--td:#8b8fa3;--g:#00d26a;--gb:rgba(0,210,106,.08);--r:#ff4757;--rb:rgba(255,71,87,.08);--y:#ffa502;--b:#3498ff;--p:#a855f7;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--t);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:14px;max-width:1100px;margin:0 auto;font-size:13px;}
+.hdr{text-align:center;margin-bottom:18px;}.hdr h1{font-size:21px;font-weight:700;margin-bottom:3px;}.hdr p{color:var(--td);font-size:11px;line-height:1.4;}
+.summ{display:flex;gap:10px;justify-content:center;margin-bottom:18px;flex-wrap:wrap;}
+.sc{background:var(--s);border:1px solid var(--bd);border-radius:8px;padding:10px 16px;text-align:center;}
+.sc .l{font-size:9px;color:var(--td);text-transform:uppercase;letter-spacing:.5px;}.sc .v{font-size:20px;font-weight:700;}
+.gl{font-size:15px;font-weight:700;margin:16px 0 10px;padding-bottom:5px;border-bottom:2px solid var(--bd);}
+.gl.lo{color:var(--g);}.gl.sh{color:var(--r);}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;}
+@media(max-width:700px){.grid{grid-template-columns:1fr;}}
+.card{background:var(--s);border:1px solid var(--bd);border-radius:10px;cursor:pointer;transition:border-color .15s;overflow:hidden;}
+.card:hover{border-color:var(--b);}
+.card-hd{display:flex;align-items:center;padding:10px 12px;gap:8px;}
+.card-tk{font-size:20px;font-weight:800;}.card-nm{color:var(--td);font-size:11px;flex:1;}
+.pill{padding:2px 7px;border-radius:10px;font-size:9px;font-weight:700;}
+.pill-sl{background:var(--gb);color:var(--g);}.pill-l{background:rgba(0,210,106,.04);color:#4ade80;}
+.pill-s{background:rgba(255,71,87,.04);color:#f87171;}.pill-ss{background:var(--rb);color:var(--r);}
+.card-body{display:grid;grid-template-columns:1fr 1fr 1fr;border-top:1px solid var(--bd);font-size:11px;}
+.card-stat{padding:8px 10px;text-align:center;border-right:1px solid var(--bd);}.card-stat:last-child{border-right:none;}
+.card-stat .cl{font-size:9px;color:var(--td);text-transform:uppercase;}.card-stat .cv{font-size:16px;font-weight:700;margin-top:1px;}
+.card-stat .csub{font-size:9px;color:var(--td);margin-top:1px;}
+.card-foot{padding:7px 12px;border-top:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--td);}
+.card-foot span:last-child{color:var(--b);}
+
+/* Refresh bar */
+.refresh-bar{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:18px;flex-wrap:wrap;}
+.refresh-btn{background:var(--b);color:#fff;border:none;padding:8px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s;}
+.refresh-btn:hover{opacity:.85;}
+.refresh-btn:disabled{opacity:.4;cursor:not-allowed;}
+.refresh-status{font-size:11px;color:var(--td);max-width:500px;text-align:left;}
+.refresh-status .step{color:var(--g);}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--bd);border-top-color:var(--b);border-radius:50%;animation:spin .8s linear infinite;margin-right:6px;vertical-align:middle;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.updated-at{font-size:10px;color:var(--td);}
+
+/* Empty state */
+.empty-state{text-align:center;padding:60px 20px;color:var(--td);}
+.empty-state h2{font-size:18px;color:var(--t);margin-bottom:8px;}
+.empty-state p{font-size:13px;margin-bottom:20px;line-height:1.5;}
+
+/* MODAL */
+.modal-bg{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.8);z-index:1000;overflow-y:auto;padding:20px 10px;}
+.modal-bg.open{display:block;}
+.modal{background:var(--bg);border:1px solid var(--bd);border-radius:14px;max-width:760px;margin:0 auto;position:relative;}
+.modal-x{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--td);font-size:24px;cursor:pointer;z-index:10;}.modal-x:hover{color:var(--t);}
+
+.mhdr{padding:16px 18px 12px;border-bottom:1px solid var(--bd);}
+.mhdr-row1{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
+.mhdr .mtk{font-size:28px;font-weight:800;}.mhdr .mnm{font-size:14px;color:var(--td);}
+.mhdr-row2{margin-top:4px;font-size:11px;color:var(--td);}
+.mhdr-row3{margin-top:6px;display:flex;gap:6px;align-items:center;}
+
+.msec{padding:14px 18px;border-bottom:1px solid var(--bd);}
+.msec-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--td);margin-bottom:10px;}
+
+.pred-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+@media(max-width:600px){.pred-grid{grid-template-columns:1fr 1fr;}}
+.pred-cell{background:var(--s);border-radius:8px;padding:10px;text-align:center;}
+.pred-cell .pl{font-size:9px;color:var(--td);text-transform:uppercase;}.pred-cell .pv{font-size:20px;font-weight:800;margin-top:2px;}
+.pred-cell .ps{font-size:10px;color:var(--td);margin-top:2px;}
+.pred-cell.big{grid-column:span 1;}.pred-cell.big .pv{font-size:26px;}
+
+.range-bar{height:8px;background:var(--s2);border-radius:4px;position:relative;margin:10px 0 4px;}
+.range-fill{position:absolute;height:100%;border-radius:4px;}.range-marker{position:absolute;width:3px;height:14px;top:-3px;border-radius:2px;}
+.range-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--td);}
+
+.chart-wrap{position:relative;height:200px;margin:6px 0;}
+.chart-duo{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+@media(max-width:600px){.chart-duo{grid-template-columns:1fr;}}
+.chart-box{position:relative;}
+.chart-box .ch-label{font-size:10px;color:var(--td);text-transform:uppercase;font-weight:600;margin-bottom:4px;}
+
+.bt-tbl{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px;}
+.bt-tbl th{background:var(--s2);padding:5px 8px;text-align:left;font-size:9px;color:var(--td);text-transform:uppercase;}
+.bt-tbl td{padding:5px 8px;border-bottom:1px solid var(--bd);}
+.bt-tbl .eg{color:var(--g);font-weight:600;}.bt-tbl .ey{color:var(--y);font-weight:600;}.bt-tbl .er{color:var(--r);font-weight:600;}
+.bt-tbl .avg-row{background:var(--s2);font-weight:700;}
+
+.model-compare{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;}
+.mc-box{background:var(--s);border-radius:8px;padding:10px;text-align:center;border:2px solid transparent;}
+.mc-box.best{border-color:var(--g);}
+.mc-box .mc-name{font-size:10px;color:var(--td);text-transform:uppercase;}.mc-box .mc-pred{font-size:16px;font-weight:700;margin:3px 0;}
+.mc-box .mc-err{font-size:11px;}
+
+.thesis-box{padding:12px;border-radius:8px;line-height:1.5;font-size:12px;}
+.thesis-box.bull{background:rgba(0,210,106,.05);border-left:3px solid var(--g);}
+.thesis-box.bear{background:rgba(255,71,87,.05);border-left:3px solid var(--r);}
+.thesis-box h4{font-size:11px;text-transform:uppercase;margin-bottom:4px;}
+.thesis-box.bull h4{color:var(--g);}.thesis-box.bear h4{color:var(--r);}
+
+.note{background:var(--s);border:1px solid var(--bd);border-radius:8px;padding:10px;margin-top:16px;font-size:10px;color:var(--td);line-height:1.5;}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="hdr">
+  <h1>Google Trends Earnings Screener</h1>
+  <p>Next-quarter revenue estimates from backtested search-to-revenue regression &bull; Top 5 longs &bull; Top 5 shorts &bull; Click any card for detail</p>
+</div>
+
+<div class="refresh-bar">
+  <button class="refresh-btn" id="refreshBtn" onclick="doRefresh()">Refresh All Data</button>
+  <div class="refresh-status" id="refreshStatus"></div>
+  <div class="updated-at" id="updatedAt"></div>
+</div>
+
+<div id="dashboard"></div>
+
+<div class="modal-bg" id="mbg">
+  <div class="modal" id="modal"></div>
+</div>
+
+<div class="note" id="noteBox" style="display:none;">
+  <strong>Methodology:</strong> For each company, a linear regression maps quarterly avg Google Trends search interest to quarterly revenue. Three models tested: simple (same-quarter), lagged (prior quarter predicts next), and combo (average). Walk-forward backtesting trains on past quarters and predicts the next unseen one. The model with lowest average out-of-sample error is selected. Confidence range = prediction Â± (avg error + 1 std dev). <strong>This is a screening tool, not investment advice.</strong>
+</div>
+
+<script>
+let D=[], NL=0;
+
+const fm=v=>v==null?'â':(v>0?'+':'')+v.toFixed(1);
+const fmD=v=>'$'+(v>=1000?(v/1000).toFixed(1)+'B':v.toFixed(0)+'M');
+const pc=s=>({'STRONG LONG':'pill-sl','LONG':'pill-l','SHORT':'pill-s','STRONG SHORT':'pill-ss'})[s]||'pill-l';
+const ec=e=>{const a=Math.abs(e);return a<8?'eg':a<20?'ey':'er';};
+
+// ââ Refresh logic ââ
+let pollTimer=null;
+
+function doRefresh(){
+  const btn=document.getElementById('refreshBtn');
+  const status=document.getElementById('refreshStatus');
+  btn.disabled=true;
+  btn.textContent='Running...';
+  status.innerHTML='<span class="spinner"></span>Starting pipeline...';
+
+  fetch('/api/refresh',{method:'POST'}).then(r=>r.json()).then(d=>{
+    if(d.status==='already_running'){
+      status.innerHTML='<span class="spinner"></span>Pipeline already running...';
+    }
+    pollTimer=setInterval(pollStatus,2000);
+  }).catch(e=>{
+    status.textContent='Error: '+e.message;
+    btn.disabled=false;
+    btn.textContent='Refresh All Data';
+  });
+}
+
+function pollStatus(){
+  fetch('/api/status').then(r=>r.json()).then(s=>{
+    const status=document.getElementById('refreshStatus');
+    const btn=document.getElementById('refreshBtn');
+
+    if(s.progress.length>0){
+      const last=s.progress[s.progress.length-1];
+      status.innerHTML='<span class="spinner"></span><span class="step">'+last+'</span>';
+    }
+
+    if(!s.running){
+      clearInterval(pollTimer);
+      if(s.error){
+        status.textContent='Error: '+s.error;
+      } else {
+        status.innerHTML='<span style="color:var(--g)">â Done!</span> Loading fresh data...';
+        loadData();
+      }
+      btn.disabled=false;
+      btn.textContent='Refresh All Data';
+    }
+  });
+}
+
+// ââ Data loading ââ
+function loadData(){
+  fetch('/api/data').then(r=>{
+    if(!r.ok) throw new Error('No data');
+    return r.json();
+  }).then(data=>{
+    D=data.companies;
+    NL=data.n_longs;
+    renderDashboard(data);
+    document.getElementById('refreshStatus').innerHTML='';
+  }).catch(e=>{
+    document.getElementById('dashboard').innerHTML=`
+      <div class="empty-state">
+        <h2>No Data Yet</h2>
+        <p>Click <strong>Refresh All Data</strong> to run the analysis pipeline.<br>
+        This fetches Google Trends, yfinance fundamentals, runs correlation analysis,<br>
+        backtests models, and generates next-quarter predictions.<br><br>
+        It takes about 2-3 minutes due to Google Trends rate limiting.</p>
+      </div>`;
+  });
+}
+
+function renderDashboard(data){
+  const dash=document.getElementById('dashboard');
+  const ua=document.getElementById('updatedAt');
+  document.getElementById('noteBox').style.display='block';
+
+  if(data.updated){
+    const d=new Date(data.updated);
+    ua.textContent='Last updated: '+d.toLocaleString();
+  }
+
+  dash.innerHTML=`
+    <div class="summ">
+      <div class="sc"><div class="l">Companies</div><div class="v">${data.n_longs+data.n_shorts}</div></div>
+      <div class="sc"><div class="l">Avg Backtest Error</div><div class="v">${data.avg_err}%</div></div>
+      <div class="sc"><div class="l">Significant (p&lt;0.05)</div><div class="v" style="color:var(--g)">${data.n_sig}</div></div>
+      <div class="sc"><div class="l">Long Signals</div><div class="v" style="color:var(--g)">${data.n_longs}</div></div>
+      <div class="sc"><div class="l">Short Signals</div><div class="v" style="color:var(--r)">${data.n_shorts}</div></div>
+    </div>
+    <div class="gl lo">LONG CANDIDATES â Rising Search Demand</div>
+    <div class="grid" id="longGrid"></div>
+    <div class="gl sh">SHORT CANDIDATES â Fading Search Demand</div>
+    <div class="grid" id="shortGrid"></div>`;
+
+  const lG=document.getElementById('longGrid'),sG=document.getElementById('shortGrid');
+  D.forEach((d,i)=>{
+    const isL=d.cs>0, p=d.pr, clr=isL?'var(--g)':'var(--r)';
+    const card=document.createElement('div');
+    card.className='card';
+    card.onclick=()=>openModal(i);
+    card.innerHTML=`
+      <div class="card-hd">
+        <div class="card-tk" style="color:${clr}">${d.tk}</div>
+        <div class="card-nm">${d.nm}</div>
+        <span class="pill ${pc(d.sig)}">${d.sig}</span>
+      </div>
+      <div class="card-body">
+        <div class="card-stat"><div class="cl">Next Q Pred</div><div class="cv" style="color:${clr}">${fmD(p.revenue_m)}</div><div class="csub">${fmD(p.low_m)} â ${fmD(p.high_m)}</div></div>
+        <div class="card-stat"><div class="cl">QoQ Growth</div><div class="cv" style="color:${p.implied_qoq_pct>0?'var(--g)':'var(--r)'}">${fm(p.implied_qoq_pct)}%</div><div class="csub">YoY: ${fm(p.implied_yoy_pct)}%</div></div>
+        <div class="card-stat"><div class="cl">Model Fit</div><div class="cv" style="color:${d.pv<0.05?'var(--g)':'var(--td)'}">RÂ²=${d.r2.toFixed(2)}</div><div class="csub">Error: ${d.bte}%</div></div>
+      </div>
+      <div class="card-foot"><span>${d.sec} Â· $${d.mcb}B</span><span>View Detail â</span></div>`;
+    (i<NL?lG:sG).appendChild(card);
+  });
+}
+
+// ââ Charts ââ
+let activeCharts=[];
+function killCharts(){activeCharts.forEach(c=>{try{c.destroy();}catch(e){}});activeCharts=[];}
+function makeChart(container,cfg){
+  const canvas=document.createElement('canvas');
+  canvas.style.width='100%';
+  container.appendChild(canvas);
+  const chart=new Chart(canvas,cfg);
+  activeCharts.push(chart);
+  return chart;
+}
+
+function openModal(idx){
+  killCharts();
+  const d=D[idx], p=d.pr, isL=d.cs>0;
+  const clr=isL?'0,210,106':'255,71,87';
+  const modal=document.getElementById('modal');
+
+  let thesis='';
+  if(isL){
+    if(p.implied_qoq_pct>0) thesis=`Search demand for "${d.st}" is trending up, and the model predicts ${fm(p.implied_qoq_pct)}% QoQ revenue growth to ${fmD(p.revenue_m)}. This supports the long thesis â rising consumer interest is translating into revenue momentum. The model has backtested at ${d.bte}% average error.`;
+    else thesis=`While search trends for "${d.st}" are rising (composite score ${fm(d.cs)}), the model actually predicts a slight QoQ decline of ${fm(p.implied_qoq_pct)}%. This is a caution flag â the long signal from trends may not translate to revenue growth this quarter. Seasonality or tough comps could be factors.`;
+  } else {
+    if(p.implied_qoq_pct<0) thesis=`Search demand for "${d.st}" is declining, and the model predicts ${fm(p.implied_qoq_pct)}% QoQ revenue decline to ${fmD(p.revenue_m)}. This supports the short thesis â fading consumer interest is pulling revenue down. Backtest accuracy of ${d.bte}% gives moderate confidence.`;
+    else thesis=`Search trends for "${d.st}" are declining (composite ${fm(d.cs)}), but the model still predicts QoQ revenue growth of ${fm(p.implied_qoq_pct)}%. This conflicts with the short thesis â the company may be growing through other channels not captured by search data. Proceed with caution.`;
+  }
+
+  const bmLabel={'simple':'Same-Quarter (trends this Q â revenue this Q)','lag':'Lagged (trends last Q â revenue this Q)','combo':'Combo (average of same-quarter + lagged)'}[d.bm];
+  const r2interp=d.r2>=0.7?'Strong â explains '+Math.round(d.r2*100)+'% of revenue variance':d.r2>=0.4?'Moderate â explains '+Math.round(d.r2*100)+'% of revenue variance':'Weak â only explains '+Math.round(d.r2*100)+'% of variance';
+  const pvinterp=d.pv<0.01?'Highly significant (p < 0.01)':d.pv<0.05?'Statistically significant (p < 0.05)':d.pv<0.1?'Marginal significance (p < 0.10)':'Not statistically significant (p = '+d.pv.toFixed(3)+')';
+
+  const rLow=p.low_m, rHigh=p.high_m, rPred=p.revenue_m, rLast=p.last_actual_m;
+  const rMin=Math.min(rLow,rLast)*0.95, rMax=rHigh*1.05, rRange=rMax-rMin;
+  const predPct=((rPred-rMin)/rRange*100).toFixed(1);
+  const lastPct=((rLast-rMin)/rRange*100).toFixed(1);
+  const lowPct=((rLow-rMin)/rRange*100).toFixed(1);
+  const highPct=((rHigh-rMin)/rRange*100).toFixed(1);
+
+  modal.innerHTML=`
+    <button class="modal-x" onclick="closeModal()">Ã</button>
+    <div class="mhdr">
+      <div class="mhdr-row1"><span class="mtk" style="color:rgba(${clr},.9)">${d.tk}</span><span class="mnm">${d.nm}</span></div>
+      <div class="mhdr-row2">${d.sec} Â· $${d.mcb}B market cap Â· $${d.cp?d.cp.toFixed(2):'?'}/share${d.pe?' Â· P/E '+d.pe.toFixed(0)+'x':''}${d.fpe?' Â· Fwd P/E '+d.fpe.toFixed(0)+'x':''}</div>
+      <div class="mhdr-row3"><span class="pill ${pc(d.sig)}" style="font-size:11px;padding:3px 10px;">${d.sig}</span><span style="font-size:11px;color:var(--td);margin-left:4px;">Trend Score: ${fm(d.cs)}</span></div>
+    </div>
+
+    <div class="msec">
+      <div class="msec-title">Next Quarter Prediction</div>
+      <div class="pred-grid">
+        <div class="pred-cell"><div class="pl">Last Reported</div><div class="pv" style="color:var(--td)">${fmD(rLast)}</div><div class="ps">Most recent quarter</div></div>
+        <div class="pred-cell big"><div class="pl">Predicted Revenue</div><div class="pv" style="color:rgba(${clr},.95)">${fmD(rPred)}</div><div class="ps">${fmD(rLow)} â ${fmD(rHigh)} range</div></div>
+        <div class="pred-cell"><div class="pl">Implied QoQ</div><div class="pv" style="color:${p.implied_qoq_pct>0?'var(--g)':'var(--r)'}">${fm(p.implied_qoq_pct)}%</div><div class="ps">YoY: ${fm(p.implied_yoy_pct)}%</div></div>
+        ${p.pred_gross_profit_m?`<div class="pred-cell"><div class="pl">Est. Gross Profit</div><div class="pv" style="color:var(--p)">${fmD(p.pred_gross_profit_m)}</div><div class="ps">Assumed ${p.assumed_gross_margin}% margin</div></div>`:''}
+        ${p.pred_op_income_m?`<div class="pred-cell"><div class="pl">Est. Operating Inc.</div><div class="pv" style="color:var(--b)">${fmD(p.pred_op_income_m)}</div><div class="ps">Assumed ${p.assumed_op_margin}% margin</div></div>`:''}
+      </div>
+      <div class="range-bar">
+        <div class="range-fill" style="left:${lowPct}%;width:${highPct-lowPct}%;background:rgba(${clr},.2);border-radius:4px;"></div>
+        <div class="range-marker" style="left:${lastPct}%;background:var(--td);" title="Last actual"></div>
+        <div class="range-marker" style="left:${predPct}%;background:rgba(${clr},1);" title="Prediction"></div>
+      </div>
+      <div class="range-labels"><span>${fmD(rLow)}</span><span style="color:var(--td)">â Last actual</span><span style="color:rgba(${clr},1)">â Prediction</span><span>${fmD(rHigh)}</span></div>
+    </div>
+
+    <div class="msec">
+      <div class="msec-title">Search Trend Right Now â What the Model Sees</div>
+      <div style="font-size:11px;color:var(--td);margin-bottom:6px;">Current quarter avg search interest: <strong style="color:var(--t)">${d.cqt.toFixed(0)}</strong>. ${d.rtv.length>0?'Last '+d.rtv.length+' weeks:':'No recent weekly data.'}</div>
+      <div id="recentChartWrap" style="height:160px;"></div>
+    </div>
+
+    <div class="msec">
+      <div class="msec-title">Historical: Search Interest vs Revenue by Quarter</div>
+      <div id="histChartWrap" style="height:220px;"></div>
+    </div>
+
+    <div class="msec">
+      <div class="msec-title">Walk-Forward Backtest â Predicted vs Actual</div>
+      <div id="btChartWrap" style="height:180px;"></div>
+      <table class="bt-tbl">
+        <thead><tr><th>Quarter</th><th>Actual</th><th>Predicted</th><th>Error</th><th>Train</th></tr></thead>
+        <tbody>${d.bt.map(b=>{
+          const pk='pred_'+d.bm+'_m', ek='err_'+d.bm;
+          return `<tr><td>${b.quarter}</td><td>${fmD(b.actual_m)}</td><td>${fmD(b[pk])}</td><td class="${ec(b[ek])}">${fm(b[ek])}%</td><td>${b.train_size}Q</td></tr>`;
+        }).join('')}
+        <tr class="avg-row"><td colspan="3">Average Error</td><td>${d.bte}%</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="msec">
+      <div class="msec-title">Model Details</div>
+      <div style="font-size:12px;line-height:1.6;">
+        <strong>Selected model:</strong> ${bmLabel}<br>
+        <strong>RÂ² = ${d.r2.toFixed(3)}:</strong> ${r2interp}<br>
+        <strong>p-value = ${d.pv.toFixed(4)}:</strong> ${pvinterp}
+      </div>
+      <div class="model-compare">
+        ${['simple','lag','combo'].map(m=>`
+          <div class="mc-box ${d.bm===m?'best':''}">
+            <div class="mc-name">${m==='simple'?'Same-Q':m==='lag'?'Lagged':'Combo'}${d.bm===m?' â':''}</div>
+            <div class="mc-pred">${d.ap[m]?fmD(d.ap[m]):'â'}</div>
+            <div class="mc-err ${ec(d.ae[m]||0)}">${d.ae[m]!=null?d.ae[m]+'% err':'â'}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <div class="msec" style="border-bottom:none;">
+      <div class="msec-title">What This Means for the Trade</div>
+      <div class="thesis-box ${isL?'bull':'bear'}">
+        <h4>${isL?'Bull Case':'Bear Case'}</h4>
+        ${thesis}
+      </div>
+    </div>`;
+
+  document.getElementById('mbg').classList.add('open');
+  document.body.style.overflow='hidden';
+
+  setTimeout(()=>{
+    if(d.rtv.length>0){
+      const wrap=document.getElementById('recentChartWrap');
+      makeChart(wrap,{type:'line',data:{
+        labels:d.rtd.map(dt=>{const p=dt.split('-');return p[1]+'/'+p[2];}),
+        datasets:[{data:d.rtv,borderColor:`rgba(${clr},.85)`,backgroundColor:`rgba(${clr},.08)`,fill:true,tension:.3,pointRadius:2}]
+      },options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+        scales:{x:{ticks:{color:'#8b8fa3',font:{size:9}},grid:{color:'rgba(45,49,72,.3)'}},y:{ticks:{color:'#8b8fa3'},grid:{color:'rgba(45,49,72,.3)'},min:0}}}});
+    }
+
+    const qd=d.qd;
+    const predQ={date:'Next Q',revenue_m:d.pr.revenue_m,avg_trend:d.cqt};
+    const allQ=[...qd,predQ];
+    const hw=document.getElementById('histChartWrap');
+    makeChart(hw,{type:'bar',data:{
+      labels:allQ.map((q,i)=>i===allQ.length-1?'PREDICTED':q.date),
+      datasets:[
+        {type:'bar',label:'Revenue ($M)',data:allQ.map(q=>q.revenue_m),
+         backgroundColor:allQ.map((q,i)=>i===allQ.length-1?`rgba(${clr},.35)`:'rgba(168,85,247,.3)'),
+         borderColor:allQ.map((q,i)=>i===allQ.length-1?`rgba(${clr},.8)`:'rgba(168,85,247,.6)'),
+         borderWidth:allQ.map((q,i)=>i===allQ.length-1?2:1),yAxisID:'y'},
+        {type:'line',label:'Avg Search Interest',data:allQ.map(q=>q.avg_trend),
+         borderColor:`rgba(${clr},.9)`,fill:false,tension:.3,pointRadius:3,yAxisID:'y1'}
+      ]
+    },options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#8b8fa3',font:{size:9}}}},
+      scales:{x:{ticks:{color:'#8b8fa3',font:{size:9}},grid:{display:false}},
+        y:{position:'left',ticks:{color:'#a855f7',callback:v=>'$'+v+'M',font:{size:9}},grid:{color:'rgba(45,49,72,.3)'}},
+        y1:{position:'right',ticks:{color:'#8b8fa3',font:{size:9}},grid:{display:false},min:0}}}});
+
+    const bt=d.bt, pk='pred_'+d.bm+'_m';
+    const bw=document.getElementById('btChartWrap');
+    makeChart(bw,{type:'line',data:{
+      labels:bt.map(b=>b.quarter),
+      datasets:[
+        {label:'Actual',data:bt.map(b=>b.actual_m),borderColor:'rgba(168,85,247,.9)',backgroundColor:'rgba(168,85,247,.1)',fill:true,tension:.3,pointRadius:4},
+        {label:'Predicted',data:bt.map(b=>b[pk]),borderColor:`rgba(${clr},.9)`,borderDash:[5,3],pointRadius:4,pointStyle:'triangle',tension:.3}
+      ]
+    },options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#8b8fa3',font:{size:9}}}},
+      scales:{x:{ticks:{color:'#8b8fa3',font:{size:9}},grid:{color:'rgba(45,49,72,.3)'}},
+        y:{ticks:{color:'#8b8fa3',callback:v=>'$'+v+'M',font:{size:9}},grid:{color:'rgba(45,49,72,.3)'}}}}});
+  },50);
+}
+
+function closeModal(){
+  killCharts();
+  document.getElementById('mbg').classList.remove('open');
+  document.body.style.overflow='';
+}
+document.getElementById('mbg').addEventListener('click',e=>{if(e.target.id==='mbg')closeModal();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+
+// ââ Init ââ
+loadData();
+</script>
+</body>
+</html>
