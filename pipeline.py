@@ -80,6 +80,48 @@ def log(msg, callback=None):
         callback(msg)
 
 
+MAX_RETRIES = 4
+
+
+def new_pytrends():
+    """Create a fresh TrendReq session (new cookies)."""
+    return TrendReq(hl='en-US', tz=360, retries=3, backoff_factor=1.0)
+
+
+def fetch_trends_with_retry(pytrends_obj, terms, timeframe, log_fn, progress_cb):
+    """Fetch Google Trends with retry + exponential backoff."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            if attempt > 0:
+                pytrends_obj = new_pytrends()
+            pytrends_obj.build_payload(terms, timeframe=timeframe, geo='US')
+            data = pytrends_obj.interest_over_time()
+            return pytrends_obj, data
+        except Exception as e:
+            wait = (attempt + 1) * 15 + __import__('random').uniform(5, 15)
+            log_fn(f"    Trends retry {attempt+1}/{MAX_RETRIES}: {e} (waiting {wait:.0f}s)", progress_cb)
+            __import__('time').sleep(wait)
+    return pytrends_obj, None
+
+
+def fetch_yf_with_retry(ticker, log_fn, progress_cb):
+    """Fetch yfinance Ticker with retry on 429."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            stock = yf.Ticker(ticker)
+            _ = stock.info
+            return stock
+        except Exception as e:
+            if '429' in str(e) and attempt < MAX_RETRIES - 1:
+                wait = (attempt + 1) * 10 + __import__('random').uniform(5, 10)
+                log_fn(f"    yfinance retry {attempt+1}/{MAX_RETRIES} for {ticker}: {e} (waiting {wait:.0f}s)", progress_cb)
+                __import__('time').sleep(wait)
+            else:
+                raise
+    return None
+
+
+
 def run_pipeline(progress_cb=None):
     """
     Runs the full pipeline end-to-end. Returns a dict with:
@@ -90,7 +132,7 @@ def run_pipeline(progress_cb=None):
       - 'avg_err': float
       - 'updated': ISO timestamp
     """
-    pytrends = TrendReq(hl='en-US', tz=360)
+    pytrends = new_pytrends()
 
     # ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     # Step 1: Fetch 12-month Google Trends
@@ -102,23 +144,18 @@ def run_pipeline(progress_cb=None):
     for i in range(0, len(tickers), 4):
         batch = tickers[i:i+4]
         terms = [COMPANIES[t][0] for t in batch]
-        try:
-            pytrends.build_payload(terms, timeframe='today 12-m', geo='US')
-            data = pytrends.interest_over_time()
-            if not data.empty:
-                for tk, term in zip(batch, terms):
-                    if term in data.columns:
-                        trends_1y[tk] = {
-                            "search_term": term,
-                            "name": COMPANIES[tk][1],
-                            "sector": COMPANIES[tk][2],
-                            "dates": [d.strftime('%Y-%m-%d') for d in data.index],
-                            "values": data[term].tolist()
-                        }
-            time.sleep(random.uniform(2, 4))
-        except Exception as e:
-            log(f"  Trends batch error: {e}", progress_cb)
-            time.sleep(8)
+        pytrends, data = fetch_trends_with_retry(pytrends, terms, 'today 12-m', log, progress_cb)
+        if data is not None and not data.empty:
+            for tk, term in zip(batch, terms):
+                if term in data.columns:
+                    trends_1y[tk] = {
+                        "search_term": term,
+                        "name": COMPANIES[tk][1],
+                        "sector": COMPANIES[tk][2],
+                        "dates": [d.strftime('%Y-%m-%d') for d in data.index],
+                        "values": data[term].tolist()
+                    }
+        time.sleep(random.uniform(5, 10))
 
     log(f"  Got 12m trends for {len(trends_1y)} companies", progress_cb)
 
@@ -189,7 +226,9 @@ def run_pipeline(progress_cb=None):
         search_term = info['search_term']
 
         try:
-            stock = yf.Ticker(tk)
+            stock = fetch_yf_with_retry(tk, log, progress_cb)
+            if stock is None:
+                continue
             stock_info = stock.info
 
             # Revenue
@@ -208,18 +247,17 @@ def run_pipeline(progress_cb=None):
             if len(rev_vals) < 4:
                 continue
 
-            # 5-year trends
-            pytrends.build_payload([search_term], timeframe='today 5-y', geo='US')
-            td5 = pytrends.interest_over_time()
-            if td5.empty:
+            # 5-year trends with retry
+            pytrends, td5 = fetch_trends_with_retry(pytrends, [search_term], 'today 5-y', log, progress_cb)
+            if td5 is None or td5.empty:
                 continue
             trend_vals_5y = td5[search_term].tolist()
             trend_dates_5y = list(td5.index)
-            time.sleep(random.uniform(1.5, 3))
+            time.sleep(random.uniform(5, 10))
 
         except Exception as e:
             log(f"  {tk} skip: {e}", progress_cb)
-            time.sleep(3)
+            time.sleep(5)
             continue
 
         # Map trends to quarters
@@ -332,7 +370,9 @@ def run_pipeline(progress_cb=None):
         search_term = info['search_term']
 
         try:
-            stock = yf.Ticker(ticker)
+            stock = fetch_yf_with_retry(ticker, log, progress_cb)
+            if stock is None:
+                continue
             stock_info = stock.info
 
             qis = stock.quarterly_income_stmt
@@ -356,19 +396,20 @@ def run_pipeline(progress_cb=None):
             except:
                 pass
 
-            # 5-year trends
-            pytrends.build_payload([search_term], timeframe='today 5-y', geo='US')
-            td5 = pytrends.interest_over_time()
+            # 5-year trends with retry
+            pytrends, td5 = fetch_trends_with_retry(pytrends, [search_term], 'today 5-y', log, progress_cb)
+            if td5 is None or td5.empty:
+                log(f"  {ticker} backtest skip: could not fetch 5y trends", progress_cb)
+                continue
             trend_vals_5y = td5[search_term].tolist()
             trend_dates_5y = list(td5.index)
-            time.sleep(random.uniform(1.5, 3))
+            time.sleep(random.uniform(5, 10))
 
-            # Recent 3 months
-            pytrends.build_payload([search_term], timeframe='today 3-m', geo='US')
-            rd = pytrends.interest_over_time()
-            recent_vals = rd[search_term].tolist() if not rd.empty else []
-            recent_dates = [d.strftime('%Y-%m-%d') for d in rd.index] if not rd.empty else []
-            time.sleep(random.uniform(1, 2.5))
+            # Recent 3 months with retry
+            pytrends, rd = fetch_trends_with_retry(pytrends, [search_term], 'today 3-m', log, progress_cb)
+            recent_vals = rd[search_term].tolist() if rd is not None and not rd.empty else []
+            recent_dates = [d.strftime('%Y-%m-%d') for d in rd.index] if rd is not None and not rd.empty else []
+            time.sleep(random.uniform(5, 10))
 
         except Exception as e:
             log(f"  {ticker} backtest skip: {e}", progress_cb)
