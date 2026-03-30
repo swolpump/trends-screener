@@ -1,21 +1,22 @@
 """
-Consolidated data pipeline: Google Trends + yfinance + regression backtesting.
+Consolidated data pipeline: Google Trends + Yahoo Finance + regression backtesting.
 Runs the full analysis and returns JSON-ready data for the dashboard.
+Uses direct Yahoo Finance API with crumb auth (works from cloud IPs).
 """
 
 import json
 import time
 import random
 import math
+import requests as req_lib
 import numpy as np
-import yfinance as yf
 from datetime import datetime, timedelta
 from pytrends.request import TrendReq
 from scipy import stats
 
-# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Step 0: Company definitions
-# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 COMPANIES = {
     "AAPL": ("Apple iPhone", "Apple", "Technology"),
     "TSLA": ("Tesla", "Tesla", "Auto / EV"),
@@ -98,28 +99,183 @@ def fetch_trends_with_retry(pytrends_obj, terms, timeframe, log_fn, progress_cb)
             data = pytrends_obj.interest_over_time()
             return pytrends_obj, data
         except Exception as e:
-            wait = (attempt + 1) * 15 + __import__('random').uniform(5, 15)
+            wait = (attempt + 1) * 15 + random.uniform(5, 15)
             log_fn(f"    Trends retry {attempt+1}/{MAX_RETRIES}: {e} (waiting {wait:.0f}s)", progress_cb)
-            __import__('time').sleep(wait)
+            time.sleep(wait)
+    return pytrends_obj, Nonettempt > 0:
+                pytrends_obj = new_pytrends()
+            pytrends_obj.build_payload(terms, timeframe=timeframe, geo='US')
+            data = pytrends_obj.interest_over_time()
+            return pytrends_obj, data
+        except Exception as e:
+            wait = (attempt + 1) * 15 + random.uniform(5, 15)
+            log_fn(f"    Trends retry {attempt+1}/{MAX_RETRIES}: {e} (waiting {wait:.0f}s)", progress_cb)
+            time.sleep(wait)
     return pytrends_obj, None
 
 
-def fetch_yf_with_retry(ticker, log_fn, progress_cb):
-    """Fetch yfinance Ticker with retry on 429."""
-    for attempt in range(MAX_RETRIES):
-        try:
-            stock = yf.Ticker(ticker)
-            _ = stock.info
-            return stock
-        except Exception as e:
-            if '429' in str(e) and attempt < MAX_RETRIES - 1:
-                wait = (attempt + 1) * 10 + __import__('random').uniform(5, 10)
-                log_fn(f"    yfinance retry {attempt+1}/{MAX_RETRIES} for {ticker}: {e} (waiting {wait:.0f}s)", progress_cb)
-                __import__('time').sleep(wait)
-            else:
-                raise
-    return None
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# Yahoo Finance direct API (bypasses yfinance library rate limits)
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
+class YahooFinanceDirect:
+    """Direct Yahoo Finance API access using crumb authentication.
+    Works reliably from cloud/datacenter IPs where yfinance gets 429'd."""
+
+    def __init__(self):
+        self.session = req_lib.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        })
+        self.crumb = None
+        self._init_crumb()
+
+    def _init_crumb(self):
+        """Get authentication crumb + cookies from Yahoo."""
+        try:
+            self.session.get('https://fc.yahoo.com', allow_redirects=True, timeout=10)
+            r = self.session.get('https://query2.finance.yahoo.com/v1/test/getcrumb', timeout=10)
+            if r.status_code == 200:
+                self.crumb = r.text.strip()
+        except Exception:
+            self.crumb = None
+
+    def refresh_crumb(self):
+        """Get a fresh crumb if the old one expires."""
+        self.session.cookies.clear()
+        self._init_crumb()
+
+    def get_quote_summary(self, ticker, modules=None):
+        """Fetch quote summary data (financials, key stats, etc)."""
+        if modules is None:
+            modules = ['financialData', 'incomeStatementHistoryQuarterly',
+                       'incomeStatementHistory', 'defaultKeyStatistics',
+                       'summaryDetail']
+
+        for attempt in range(3):
+            if not self.crumb:
+                self.refresh_crumb()
+            if not self.crumb:
+                time.sleep(2)
+                continue
+
+            mod_str = '&modules='.join(modules)
+            url = f'https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker}?modules={mod_str}&crumb={self.crumb}'
+
+            try:
+                r = self.session.get(url, timeout=15)
+                if r.status_code == 200:
+                    data = r.json()
+                    result = data.get('quoteSummary', {}).get('result', [])
+                    if result:
+                        return result[0]
+                elif r.status_code == 401:
+                    self.refresh_crumb()
+                    time.sleep(1)
+                    continue
+                elif r.status_code == 429:
+                    time.sleep(5 * (attempt + 1))
+                    continue
+            except Exception:
+                time.sleep(2)
+
+        return None
+
+    def get_chart(self, ticker, range_str='5y', interval='1mo'):
+        """Fetch price history using v8 chart endpoint."""
+        url = f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range={range_str}&interval={interval}'
+        try:
+            r = self.session.get(url, timeout=15)
+            if r.status_code == 200:
+                data = r.json()
+                result = data.get('chart', {}).get('result', [])
+                if result:
+                    return result[0]
+        except Exception:
+            pass
+        return None
+
+    def get_quarterly_revenue(self, ticker):
+        """Get quarterly revenue series as (dates, values) tuples."""
+        data = self.get_quote_summary(ticker, ['incomeStatementHistoryQuarterly'])
+        if not data:
+            return [], []
+
+        stmts = (data.get('incomeStatementHistoryQuarterly', {})
+                     .get('incomeStatementHistory', []))
+
+        dates = []
+        vals = []
+        for s in reversed(stmts):  # oldest first
+            rev = s.get('totalRevenue', {}).get('raw')
+            date_epoch = s.get('endDate', {}).get('raw')
+            if rev and date_epoch:
+                dates.append(datetime.utcfromtimestamp(date_epoch))
+                vals.append(float(rev))
+
+        return dates, vals
+
+    def get_quarterly_financials(self, ticker):
+        """Get quarterly revenue, gross profit, operating income."""
+        data = self.get_quote_summary(ticker, ['incomeStatementHistoryQuarterly'])
+        if not data:
+            return []
+
+        stmts = (data.get('incomeStatementHistoryQuarterly', {})
+                     .get('incomeStatementHistory', []))
+
+        records = []
+        for s in reversed(stmts):
+            date_epoch = s.get('endDate', {}).get('raw')
+            if not date_epoch:
+                continue
+            dt = datetime.utcfromtimestamp(date_epoch)
+            records.append({
+                'date': dt,
+                'revenue': s.get('totalRevenue', {}).get('raw'),
+                'gross_profit': s.get('grossProfit', {}).get('raw'),
+                'op_income': s.get('operatingIncome', {}).get('raw'),
+            })
+
+        return records
+
+    def get_stock_info(self, ticker):
+        """Get key stock info (price, market cap, PE, etc)."""
+        data = self.get_quote_summary(ticker, ['financialData', 'defaultKeyStatistics', 'summaryDetail'])
+        if not data:
+            return {}
+
+        fd = data.get('financialData', {})
+        ks = data.get('defaultKeyStatistics', {})
+        sd = data.get('summaryDetail', {})
+
+        return {
+            'currentPrice': fd.get('currentPrice', {}).get('raw'),
+            'marketCap': sd.get('marketCap', {}).get('raw', 0),
+            'trailingPE': sd.get('trailingPE', {}).get('raw'),
+            'forwardPE': sd.get('forwardPE', {}).get('raw') or ks.get('forwardPE', {}).get('raw'),
+            'totalRevenue': fd.get('totalRevenue', {}).get('raw'),
+        }
+
+    def get_price_history(self, ticker, range_str='1y', interval='1wk'):
+        """Get price history as (dates, prices) lists."""
+        chart = self.get_chart(ticker, range_str, interval)
+        if not chart:
+            return [], []
+
+        timestamps = chart.get('timestamp', [])
+        closes = chart.get('indicators', {}).get('adjclose', [{}])[0].get('adjclose', [])
+        if not closes:
+            closes = chart.get('indicators', {}).get('quote', [{}])[0].get('close', [])
+
+        dates = []
+        prices = []
+        for ts, p in zip(timestamps, closes):
+            if p is not None:
+                dates.append(datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d'))
+                prices.append(float(p))
+
+        return dates, prices
 
 
 def run_pipeline(progress_cb=None):
@@ -133,6 +289,12 @@ def run_pipeline(progress_cb=None):
       - 'updated': ISO timestamp
     """
     pytrends = new_pytrends()
+    yf_api = YahooFinanceDirect()
+
+    if not yf_api.crumb:
+        log("  Warning: Could not get Yahoo Finance crumb, retrying...", progress_cb)
+        time.sleep(3)
+        yf_api = YahooFinanceDirect()
 
     # ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     # Step 1: Fetch 12-month Google Trends
@@ -216,7 +378,7 @@ def run_pipeline(progress_cb=None):
         }
 
     # ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-    # Step 3: Deep validation â 5-year trends + revenue correlation
+    # Step 3: Deep validation â 5-year trends + revenue correlation
     # ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     log("Step 3/6: Deep validation (5-year trends + revenue)...", progress_cb)
     deep_results = {}
@@ -226,24 +388,14 @@ def run_pipeline(progress_cb=None):
         search_term = info['search_term']
 
         try:
-            stock = fetch_yf_with_retry(tk, log, progress_cb)
-            if stock is None:
+            # Get quarterly revenue via direct Yahoo API
+            financials = yf_api.get_quarterly_financials(tk)
+            if not financials or len(financials) < 4:
+                log(f"  {tk} skip: insufficient revenue data", progress_cb)
                 continue
-            stock_info = stock.info
 
-            # Revenue
-            qis = stock.quarterly_income_stmt
-            if qis is not None and not qis.empty and 'Total Revenue' in qis.index:
-                rev_series = qis.loc['Total Revenue'].dropna().sort_index()
-            else:
-                qf = stock.quarterly_financials
-                if qf is not None and not qf.empty and 'Total Revenue' in qf.index:
-                    rev_series = qf.loc['Total Revenue'].dropna().sort_index()
-                else:
-                    continue
-
-            rev_dates = list(rev_series.index)
-            rev_vals = [float(v) for v in rev_series.values]
+            rev_dates = [f['date'] for f in financials if f['revenue']]
+            rev_vals = [float(f['revenue']) for f in financials if f['revenue']]
             if len(rev_vals) < 4:
                 continue
 
@@ -257,7 +409,7 @@ def run_pipeline(progress_cb=None):
 
         except Exception as e:
             log(f"  {tk} skip: {e}", progress_cb)
-            time.sleep(5)
+            time.sleep(2)
             continue
 
         # Map trends to quarters
@@ -303,11 +455,10 @@ def run_pipeline(progress_cb=None):
         # Price correlation
         corr_price = None
         try:
-            hist = stock.history(period='5y', interval='1mo')
-            if not hist.empty and len(hist) >= 20:
-                p_vals = hist['Close'].tolist()
-                min_len = min(len(trend_vals_5y), len(p_vals))
-                corr_price = safe_nan(float(np.corrcoef(trend_vals_5y[-min_len:], p_vals[-min_len:])[0, 1]))
+            _, prices_5y = yf_api.get_price_history(tk, '5y', '1mo')
+            if len(prices_5y) >= 20:
+                min_len = min(len(trend_vals_5y), len(prices_5y))
+                corr_price = safe_nan(float(np.corrcoef(trend_vals_5y[-min_len:], prices_5y[-min_len:])[0, 1]))
         except:
             pass
 
@@ -352,7 +503,6 @@ def run_pipeline(progress_cb=None):
 
     targets = top_longs + top_shorts
     if not targets:
-        # Fallback: just take top/bottom 5
         targets = [t for t, _ in by_score[:5]] + [t for t, _ in by_score[-5:]]
         top_longs = targets[:5]
         top_shorts = targets[5:]
@@ -370,31 +520,15 @@ def run_pipeline(progress_cb=None):
         search_term = info['search_term']
 
         try:
-            stock = fetch_yf_with_retry(ticker, log, progress_cb)
-            if stock is None:
+            # Get financial data
+            financials = yf_api.get_quarterly_financials(ticker)
+            stock_info = yf_api.get_stock_info(ticker)
+
+            if not financials or len(financials) < 4:
                 continue
-            stock_info = stock.info
 
-            qis = stock.quarterly_income_stmt
-            if qis is not None and not qis.empty and 'Total Revenue' in qis.index:
-                rev_series = qis.loc['Total Revenue'].dropna().sort_index()
-            else:
-                qf = stock.quarterly_financials
-                rev_series = qf.loc['Total Revenue'].dropna().sort_index()
-
-            rev_dates = list(rev_series.index)
-            rev_vals = [float(v) for v in rev_series.values]
-
-            # Gross profit / operating income
-            gp_series = None
-            oi_series = None
-            try:
-                if 'Gross Profit' in qis.index:
-                    gp_series = qis.loc['Gross Profit'].dropna().sort_index()
-                if 'Operating Income' in qis.index:
-                    oi_series = qis.loc['Operating Income'].dropna().sort_index()
-            except:
-                pass
+            rev_dates = [f['date'] for f in financials if f['revenue']]
+            rev_vals = [float(f['revenue']) for f in financials if f['revenue']]
 
             # 5-year trends with retry
             pytrends, td5 = fetch_trends_with_retry(pytrends, [search_term], 'today 5-y', log, progress_cb)
@@ -417,12 +551,16 @@ def run_pipeline(progress_cb=None):
 
         # Map to quarters
         quarterly_data = []
-        for i, (rdt, rval) in enumerate(zip(rev_dates, rev_vals)):
+        for i, f in enumerate(financials):
+            if not f['revenue']:
+                continue
+            rdt = f['date']
+            rval = float(f['revenue'])
             q_end = rdt
             q_start = q_end - timedelta(days=90)
             q_trend = [trend_vals_5y[j] for j, tdt in enumerate(trend_dates_5y) if q_start <= tdt <= q_end]
-            gp_val = float(gp_series[rdt]) if gp_series is not None and rdt in gp_series.index else None
-            oi_val = float(oi_series[rdt]) if oi_series is not None and rdt in oi_series.index else None
+            gp_val = float(f['gross_profit']) if f.get('gross_profit') else None
+            oi_val = float(f['op_income']) if f.get('op_income') else None
             if q_trend:
                 quarterly_data.append({
                     'date': rdt.strftime('%Y-%m-%d'),
@@ -503,14 +641,8 @@ def run_pipeline(progress_cb=None):
         pred_gp = pred_next * (avg_gm / 100) if avg_gm else None
         pred_oi = pred_next * (avg_om / 100) if avg_om else None
 
-        # Prices
-        try:
-            hist_1y = stock.history(period='1y', interval='1wk')
-            prices_1y = hist_1y['Close'].tolist() if not hist_1y.empty else []
-            price_dates_1y = [d.strftime('%Y-%m-%d') for d in hist_1y.index] if not hist_1y.empty else []
-        except:
-            prices_1y = []
-            price_dates_1y = []
+        # Price history
+        price_dates_1y, prices_1y = yf_api.get_price_history(ticker, '1y', '1wk')
 
         results[ticker] = {
             'name': info['name'],
@@ -540,7 +672,7 @@ def run_pipeline(progress_cb=None):
                 'assumed_gross_margin': round(float(avg_gm), 1) if avg_gm else None,
                 'assumed_op_margin': round(float(avg_om), 1) if avg_om else None,
             },
-            'current_price': stock_info.get('currentPrice') or stock_info.get('regularMarketPrice'),
+            'current_price': stock_info.get('currentPrice'),
             'market_cap_b': round(stock_info.get('marketCap', 0) / 1e9, 1),
             'pe': round(stock_info.get('trailingPE', 0), 1) if stock_info.get('trailingPE') else None,
             'fwd_pe': round(stock_info.get('forwardPE', 0), 1) if stock_info.get('forwardPE') else None,
@@ -595,7 +727,7 @@ def run_pipeline(progress_cb=None):
         'updated': datetime.utcnow().isoformat() + 'Z',
     }
 
-    log(f"Pipeline complete â {len(js_data)} companies", progress_cb)
+    log(f"Pipeline complete â {len(js_data)} companies", progress_cb)
     return output
 
 
